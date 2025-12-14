@@ -112,7 +112,10 @@ def read_bmp_header(img_bytes):
     
     # Find where the pixel data starts (this is stored in bytes 10-13 of the header)
     try:
-        header_info['pixel_data_offset'] = int.from_bytes(img_bytes[10:14], byteorder='little')
+        # Get bytes 10, 11, 12, and 13
+        offset_bytes = img_bytes[10:14]
+        # Convert these 4 bytes to a number (little-endian means least significant byte first)
+        header_info['pixel_data_offset'] = int.from_bytes(offset_bytes, byteorder='little')
     except (ValueError, IndexError):
         print("Error: Could not read pixel data offset from BMP header. File may be corrupted.")
         return None
@@ -121,7 +124,10 @@ def read_bmp_header(img_bytes):
     # We only support uncompressed BMP files (compression type = 0)
     # This information is stored in bytes 30-33
     try:
-        header_info['compression'] = int.from_bytes(img_bytes[30:34], byteorder='little')
+        # Get bytes 30, 31, 32, and 33
+        compression_bytes = img_bytes[30:34]
+        # Convert these 4 bytes to a number
+        header_info['compression'] = int.from_bytes(compression_bytes, byteorder='little')
     except (ValueError, IndexError):
         print("Error: Could not read compression type from BMP header. File may be corrupted.")
         return None
@@ -130,15 +136,26 @@ def read_bmp_header(img_bytes):
     # This tells us if it's 24-bit (3 bytes per pixel) or 32-bit (4 bytes per pixel)
     # This is stored in bytes 28-29
     try:
-        header_info['bits_per_pixel'] = int.from_bytes(img_bytes[28:30], byteorder='little')
+        # Get bytes 28 and 29
+        bits_bytes = img_bytes[28:30]
+        # Convert these 2 bytes to a number
+        header_info['bits_per_pixel'] = int.from_bytes(bits_bytes, byteorder='little')
     except (ValueError, IndexError):
         print("Error: Could not read bits per pixel from BMP header. File may be corrupted.")
         return None
     
-    # Get the image width and height (stored in bytes 18-21 for width, 22-25 for height)
+    # Get the image width and height
+    # Width is stored in bytes 18-21
+    # Height is stored in bytes 22-25
     try:
-        header_info['width'] = int.from_bytes(img_bytes[18:22], byteorder='little')
-        header_info['height'] = int.from_bytes(img_bytes[22:26], byteorder='little', signed=True)
+        # Get bytes 18, 19, 20, and 21 for width
+        width_bytes = img_bytes[18:22]
+        header_info['width'] = int.from_bytes(width_bytes, byteorder='little')
+        
+        # Get bytes 22, 23, 24, and 25 for height
+        # signed=True means the height can be negative (for top-down images)
+        height_bytes = img_bytes[22:26]
+        header_info['height'] = int.from_bytes(height_bytes, byteorder='little', signed=True)
     except (ValueError, IndexError):
         print("Error: Could not read image dimensions from BMP header. File may be corrupted.")
         return None
@@ -193,12 +210,20 @@ def convert_message_to_binary(secret_text):
     # Computers store everything as binary (ones and zeros)
     # Each character in our message needs to become 8 bits of binary data
     binary_message = ""
+    
+    # Go through each character in the message
     for char in secret_text:
         try:
-            # ord() gets the number that represents this character (like ASCII code)
-            # format(..., '08b') converts that number to 8-bit binary with leading zeros
-            # For example: 'A' becomes 65, which becomes '01000001'
-            char_binary = format(ord(char), '08b')
+            # Get the number that represents this character (like ASCII code)
+            # For example, 'A' has the code 65
+            char_code = ord(char)
+            
+            # Convert that number to 8-bit binary with leading zeros
+            # For example: 65 becomes '01000001'
+            # The '08b' means: 8 digits, in binary format, with leading zeros
+            char_binary = format(char_code, '08b')
+            
+            # Add this character's binary to our full binary message
             binary_message = binary_message + char_binary
         except (TypeError, ValueError):
             print("Error: Invalid character in message. Please use standard text characters.")
@@ -209,6 +234,8 @@ def convert_message_to_binary(secret_text):
     # When we decode later, we'll look for this pattern to know when to stop reading
     # It's like putting a bookmark at the end of our message
     delimiter = '0000000000000001'
+    
+    # Combine the message and delimiter
     full_data = binary_message + delimiter
     
     return full_data
@@ -225,65 +252,110 @@ def encode_24bit(img_bytes, full_data, header_info):
     Returns:
         bool: True if successful, False otherwise.
     """
+    # Get the information we need from the header
     pixel_data_offset = header_info['pixel_data_offset']
     width = header_info['width']
     height = header_info['height']
     
-    # Calculate how much space we have to hide our message
-    # BMP rows must be a multiple of 4 bytes, so there might be padding bytes
-    # We need to account for this when calculating available space
-    bytes_per_pixel = 3  # 24-bit = 3 bytes per pixel
+    # In a 24-bit image, each pixel uses 3 bytes (one for Blue, one for Green, one for Red)
+    bytes_per_pixel = 3
+    
+    # Calculate how many bytes are in one row (without padding)
     bytes_per_row_without_padding = width * bytes_per_pixel
     
-    # Round up to the nearest multiple of 4 (this is the padding requirement)
-    bytes_per_row = ((bytes_per_row_without_padding + 3) // 4) * 4
+    # BMP files require each row to be a multiple of 4 bytes
+    # So if a row is 10 bytes, we need to add 2 padding bytes to make it 12 bytes
+    # Let's calculate how many bytes per row including padding
+    remainder = bytes_per_row_without_padding % 4
+    if remainder == 0:
+        # Already a multiple of 4, no padding needed
+        bytes_per_row = bytes_per_row_without_padding
+    else:
+        # Need to add padding to make it a multiple of 4
+        padding_needed = 4 - remainder
+        bytes_per_row = bytes_per_row_without_padding + padding_needed
     
-    # Calculate total number of bytes in all rows
-    number_of_rows = abs(height)  # Use absolute value since height might be negative
-    total_pixel_bytes = bytes_per_row * number_of_rows
+    # Get the number of rows (use absolute value in case height is negative)
+    if height < 0:
+        number_of_rows = -height
+    else:
+        number_of_rows = height
     
-    # Also check how many bytes are actually in the file (to be safe)
-    actual_available_bytes = len(img_bytes) - pixel_data_offset
+    # Calculate how many pixels are in the image
+    total_pixels = number_of_rows * width
     
-    # Use whichever is smaller (to be safe)
-    available_bits = min(total_pixel_bytes, actual_available_bytes)
+    # Each pixel has 3 bytes, and we can hide 1 bit in each byte
+    # So we can hide 3 bits per pixel
+    bits_per_pixel = 3
+    available_bits = total_pixels * bits_per_pixel
     
     # Check if our message will fit
-    if len(full_data) > available_bits:
-        message_size = len(full_data)
+    message_length = len(full_data)
+    if message_length > available_bits:
         print(f"Error: The message is too long for this image.")
-        print(f"Message requires {message_size} bits, but image only has {available_bits} bits available.")
+        print(f"Message requires {message_length} bits, but image only has {available_bits} bits available.")
         print(f"Try using a larger image or a shorter message.")
         return False
     
-    # Now hide each bit of our message in the image
-    # We go through each bit and change the last bit of each byte
-    for bit_position in range(len(full_data)):
-        # Calculate which byte in the image we're modifying
-        byte_index = pixel_data_offset + bit_position
+    # Now we'll hide the message bit by bit
+    # We'll go through each row, then each pixel, then each color channel
+    data_index = 0  # This keeps track of which bit of our message we're currently hiding
+    
+    # Go through each row of the image
+    for row in range(number_of_rows):
+        # Calculate where this row starts in the file
+        row_start = pixel_data_offset + (row * bytes_per_row)
         
-        # Make sure we don't try to write beyond the end of the file
-        if byte_index >= len(img_bytes):
-            print("Error: Attempted to write beyond file size. Image may be corrupted.")
-            return False
+        # Go through each pixel in this row
+        for pixel in range(width):
+            # Check if we've hidden all our data
+            if data_index >= len(full_data):
+                break  # We're done!
+            
+            # Calculate where this pixel starts in the file
+            pixel_start = row_start + (pixel * bytes_per_pixel)
+            
+            # Each pixel has 3 color channels: Blue (0), Green (1), and Red (2)
+            # We'll hide one bit in each channel
+            for channel in range(3):
+                # Check if we've hidden all our data
+                if data_index >= len(full_data):
+                    break  # We're done!
+                
+                # Calculate which byte we're modifying
+                byte_index = pixel_start + channel
+                
+                # Make sure we don't go past the end of the file
+                if byte_index >= len(img_bytes):
+                    print("Error: Attempted to write beyond file size. Image may be corrupted.")
+                    return False
+                
+                # Get the current byte value
+                current_byte = img_bytes[byte_index]
+                
+                # Clear the last bit (set it to 0)
+                # 0b11111110 in binary means all bits are 1 except the last one
+                # When we use & (AND), it keeps all bits the same except sets the last bit to 0
+                cleared_byte = current_byte & 0b11111110
+                
+                # Get the bit we want to hide (convert from string '0' or '1' to integer)
+                message_bit_string = full_data[data_index]
+                message_bit = int(message_bit_string)
+                
+                # Set the last bit to our message bit
+                # When we use | (OR), it combines the cleared byte with our bit
+                new_byte = cleared_byte | message_bit
+                
+                # Update the byte in the image
+                img_bytes[byte_index] = new_byte
+                
+                # Move to the next bit of our message
+                data_index = data_index + 1
         
-        # Get the current byte value
-        current_byte = img_bytes[byte_index]
-        
-        # Clear the last bit (set it to 0) using bitwise AND with 11111110
-        # This preserves all the other bits, just clears the last one
-        cleared_byte = current_byte & 0b11111110
-        
-        # Set the last bit to our message bit using bitwise OR
-        try:
-            message_bit = int(full_data[bit_position])  # Convert '0' or '1' to integer
-        except (ValueError, IndexError):
-            print("Error: Invalid data format. This should not happen.")
-            return False
-        new_byte = cleared_byte | message_bit  # Combine cleared byte with our bit
-        
-        # Update the byte in the image
-        img_bytes[byte_index] = new_byte
+        # Check if we're done (we skip padding bytes automatically because we only
+        # iterate through 'width' pixels, not the full bytes_per_row)
+        if data_index >= len(full_data):
+            break  # We're done!
     
     return True
 
@@ -299,60 +371,84 @@ def encode_32bit(img_bytes, full_data, header_info):
     Returns:
         bool: True if successful, False otherwise.
     """
+    # Get the information we need from the header
     pixel_data_offset = header_info['pixel_data_offset']
     width = header_info['width']
     height = header_info['height']
     
-    # Calculate available space
-    # Each pixel has 4 bytes, we use 3 of them (skip Alpha)
-    number_of_rows = abs(height)
+    # Get the number of rows (use absolute value in case height is negative)
+    if height < 0:
+        number_of_rows = -height
+    else:
+        number_of_rows = height
+    
+    # Calculate how many pixels are in the image
     total_pixels = number_of_rows * width
-    available_bits = total_pixels * 3  # 3 bytes per pixel we can use
     
-    # Also check actual file size (to be safe)
-    actual_available_bytes = len(img_bytes) - pixel_data_offset
-    available_bits_from_file = (actual_available_bytes // 4) * 3
+    # In a 32-bit image, each pixel has 4 bytes: Blue, Green, Red, and Alpha
+    # We'll skip the Alpha channel and only use Blue, Green, and Red
+    # So we can hide 3 bits per pixel
+    bits_per_pixel = 3
+    available_bits = total_pixels * bits_per_pixel
     
-    # Use the smaller value (to be safe)
-    available_bits = min(available_bits, available_bits_from_file)
-    
-    # Check if message will fit
-    if len(full_data) > available_bits:
-        message_size = len(full_data)
+    # Check if our message will fit
+    message_length = len(full_data)
+    if message_length > available_bits:
         print(f"Error: The message is too long for this image.")
-        print(f"Message requires {message_size} bits, but image only has {available_bits} bits available.")
+        print(f"Message requires {message_length} bits, but image only has {available_bits} bits available.")
         print(f"Try using a larger image or a shorter message.")
         return False
     
-    # Hide the message
-    # We go through each pixel (every 4 bytes) and use the first 3 bytes
-    data_index = 0  # Track which bit of our message we're currently hiding
-    for pixel_start in range(pixel_data_offset, len(img_bytes), 4):
-        # For each pixel, use the first 3 bytes (B, G, R)
+    # Now we'll hide the message bit by bit
+    # We'll go through each pixel (every 4 bytes) and use the first 3 bytes
+    data_index = 0  # This keeps track of which bit of our message we're currently hiding
+    
+    # Start at the pixel data and go through each pixel (every 4 bytes)
+    pixel_start = pixel_data_offset
+    while pixel_start < len(img_bytes):
+        # For each pixel, we'll use the first 3 bytes (Blue, Green, Red)
+        # We skip the 4th byte (Alpha channel)
         for channel in range(3):  # 0=Blue, 1=Green, 2=Red
-            if data_index < len(full_data):
-                byte_index = pixel_start + channel
-                
-                # Make sure we don't go out of bounds
-                if byte_index >= len(img_bytes):
-                    print("Error: Attempted to write beyond file size. Image may be corrupted.")
-                    return False
-                
-                # Get the current byte and modify its last bit
-                current_byte = img_bytes[byte_index]
-                cleared_byte = current_byte & 0b11111110  # Clear last bit
-                try:
-                    message_bit = int(full_data[data_index])  # Get our message bit
-                except (ValueError, IndexError):
-                    print("Error: Invalid data format. This should not happen.")
-                    return False
-                new_byte = cleared_byte | message_bit  # Set last bit to our message bit
-                img_bytes[byte_index] = new_byte  # Update the byte
-                data_index = data_index + 1  # Move to next bit
-            else:
-                break  # We've hidden all our data
+            # Check if we've hidden all our data
+            if data_index >= len(full_data):
+                break  # We're done!
+            
+            # Calculate which byte we're modifying
+            byte_index = pixel_start + channel
+            
+            # Make sure we don't go past the end of the file
+            if byte_index >= len(img_bytes):
+                print("Error: Attempted to write beyond file size. Image may be corrupted.")
+                return False
+            
+            # Get the current byte value
+            current_byte = img_bytes[byte_index]
+            
+            # Clear the last bit (set it to 0)
+            # 0b11111110 in binary means all bits are 1 except the last one
+            # When we use & (AND), it keeps all bits the same except sets the last bit to 0
+            cleared_byte = current_byte & 0b11111110
+            
+            # Get the bit we want to hide (convert from string '0' or '1' to integer)
+            message_bit_string = full_data[data_index]
+            message_bit = int(message_bit_string)
+            
+            # Set the last bit to our message bit
+            # When we use | (OR), it combines the cleared byte with our bit
+            new_byte = cleared_byte | message_bit
+            
+            # Update the byte in the image
+            img_bytes[byte_index] = new_byte
+            
+            # Move to the next bit of our message
+            data_index = data_index + 1
+        
+        # Check if we're done
         if data_index >= len(full_data):
-            break  # Stop if we're done
+            break  # We're done!
+        
+        # Move to the next pixel (each pixel is 4 bytes)
+        pixel_start = pixel_start + 4
     
     return True
 
