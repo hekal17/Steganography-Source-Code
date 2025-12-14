@@ -47,14 +47,8 @@ def get_secret_message():
 
 
 def read_image_file(image_file_path):
-    """Reads a BMP image file from disk.
-    
-    Args:
-        image_file_path (str): Path to the BMP image file.
-    
-    Returns:
-        bytearray: The image file bytes, or None if there was an error.
-    """
+    # Reads a BMP image file from disk.
+
     try:
         img_file = open(image_file_path, 'rb')  # 'rb' = read binary
         img_bytes = bytearray(img_file.read())   # Read all bytes and make it modifiable
@@ -73,15 +67,8 @@ def read_image_file(image_file_path):
 
 
 def validate_bmp_basic(img_bytes, image_file_path):
-    """Performs basic validation on a BMP file.
-    
-    Args:
-        img_bytes (bytearray): The image file bytes.
-        image_file_path (str): Path to the image file (for error messages).
-    
-    Returns:
-        bool: True if valid, False otherwise.
-    """
+    # Performs basic validation on a BMP file.
+
     # Check if it's actually a BMP file
     # BMP files always start with the letters 'BM' - that's how you identify them
     if img_bytes[0:2] != b'BM':
@@ -99,15 +86,8 @@ def validate_bmp_basic(img_bytes, image_file_path):
 
 
 def read_bmp_header(img_bytes):
-    """Reads and extracts information from the BMP file header.
-    
-    Args:
-        img_bytes (bytearray): The image file bytes.
-    
-    Returns:
-        dict: A dictionary containing header information, or None if there was an error.
-        Keys: 'pixel_data_offset', 'compression', 'bits_per_pixel', 'width', 'height'
-    """
+    # Reads and extracts information from the BMP file header.
+
     header_info = {}
     
     # Find where the pixel data starts (this is stored in bytes 10-13 of the header)
